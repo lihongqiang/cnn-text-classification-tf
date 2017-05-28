@@ -33,6 +33,8 @@ from keras.models import Model
 from keras.layers.normalization import BatchNormalization
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
+from data_helpers import text_to_wordlist
+
 import sys
 reload(sys)
 sys.setdefaultencoding('utf-8')
@@ -40,7 +42,7 @@ sys.setdefaultencoding('utf-8')
 ########################################
 ## set directories and parameters
 ########################################
-BASE_DIR = '../input/'
+BASE_DIR = './data/quora/'
 EMBEDDING_FILE = BASE_DIR + 'GoogleNews-vectors-negative300.bin'
 TRAIN_DATA_FILE = BASE_DIR + 'train.csv'
 TEST_DATA_FILE = BASE_DIR + 'test.csv'
@@ -74,85 +76,46 @@ print('Found %s word vectors of word2vec' % len(word2vec.vocab))
 ########################################
 print('Processing text dataset')
 
-# The function "text_to_wordlist" is from
-# https://www.kaggle.com/currie32/quora-question-pairs/the-importance-of-cleaning-text
-def text_to_wordlist(text, remove_stopwords=False, stem_words=False):
-    # Clean the text, with the option to remove stopwords and to stem words.
-    
-    # Convert words to lower case and split them
-    text = text.lower().split()
-
-    # Optionally, remove stop words
-    if remove_stopwords:
-        stops = set(stopwords.words("english"))
-        text = [w for w in text if not w in stops]
-    
-    text = " ".join(text)
-
-    # Clean the text
-    text = re.sub(r"[^A-Za-z0-9^,!.\/'+-=]", " ", text)
-    text = re.sub(r"what's", "what is ", text)
-    text = re.sub(r"\'s", " ", text)
-    text = re.sub(r"\'ve", " have ", text)
-    text = re.sub(r"can't", "cannot ", text)
-    text = re.sub(r"n't", " not ", text)
-    text = re.sub(r"i'm", "i am ", text)
-    text = re.sub(r"\'re", " are ", text)
-    text = re.sub(r"\'d", " would ", text)
-    text = re.sub(r"\'ll", " will ", text)
-    text = re.sub(r",", " ", text)
-    text = re.sub(r"\.", " ", text)
-    text = re.sub(r"!", " ! ", text)
-    text = re.sub(r"\/", " ", text)
-    text = re.sub(r"\^", " ^ ", text)
-    text = re.sub(r"\+", " + ", text)
-    text = re.sub(r"\-", " - ", text)
-    text = re.sub(r"\=", " = ", text)
-    text = re.sub(r"'", " ", text)
-    text = re.sub(r"(\d+)(k)", r"\g<1>000", text)
-    text = re.sub(r":", " : ", text)
-    text = re.sub(r" e g ", " eg ", text)
-    text = re.sub(r" b g ", " bg ", text)
-    text = re.sub(r" u s ", " american ", text)
-    text = re.sub(r"\0s", "0", text)
-    text = re.sub(r" 9 11 ", "911", text)
-    text = re.sub(r"e - mail", "email", text)
-    text = re.sub(r"j k", "jk", text)
-    text = re.sub(r"\s{2,}", " ", text)
-    
-    # Optionally, shorten words to their stems
-    if stem_words:
-        text = text.split()
-        stemmer = SnowballStemmer('english')
-        stemmed_words = [stemmer.stem(word) for word in text]
-        text = " ".join(stemmed_words)
-    
-    # Return a list of words
-    return(text)
+import cPickle as pickle
+train_data_path = 'data/quora/train.pkl'
+test_data_path = 'data/quora/test.pkl'
 
 texts_1 = [] 
 texts_2 = []
 labels = []
-with codecs.open(TRAIN_DATA_FILE, encoding='utf-8') as f:
-    reader = csv.reader(f, delimiter=',')
-    header = next(reader)
-    for values in reader:
-        texts_1.append(text_to_wordlist(values[3]))
-        texts_2.append(text_to_wordlist(values[4]))
-        labels.append(int(values[5]))
+
+if os.path.exists(train_data_path):
+    texts_1, texts_2, labels = pickle.load(open(train_data_path, "r"))
+else:
+    with codecs.open(TRAIN_DATA_FILE, encoding='utf-8') as f:
+        reader = csv.reader(f, delimiter=',')
+        header = next(reader)
+        for values in reader:
+            texts_1.append(text_to_wordlist(values[3]))
+            texts_2.append(text_to_wordlist(values[4]))
+            labels.append(int(values[5]))
+    pickle.dump((np.array(texts_1), np.array(texts_2), np.array(labels)), open(train_data_path, "w"))
+
 print('Found %s texts in train.csv' % len(texts_1))
 
 test_texts_1 = []
 test_texts_2 = []
 test_ids = []
-with codecs.open(TEST_DATA_FILE, encoding='utf-8') as f:
-    reader = csv.reader(f, delimiter=',')
-    header = next(reader)
-    for values in reader:
-        test_texts_1.append(text_to_wordlist(values[1]))
-        test_texts_2.append(text_to_wordlist(values[2]))
-        test_ids.append(values[0])
+
+if os.path.exists(test_data_path):
+    test_ids, test_texts_1, test_texts_2 = pickle.load(open(test_data_path, "r"))
+else:
+    with codecs.open(TEST_DATA_FILE, encoding='utf-8') as f:
+        reader = csv.reader(f, delimiter=',')
+        header = next(reader)
+        for values in reader:
+            test_texts_1.append(text_to_wordlist(values[1]))
+            test_texts_2.append(text_to_wordlist(values[2]))
+            test_ids.append(values[0])
+    pickle.dump((np.array(test_ids), np.array(test_texts_1), np.array(test_texts_2)), open(test_data_path, "w"))
+    
 print('Found %s texts in test.csv' % len(test_texts_1))
+
 
 tokenizer = Tokenizer(num_words=MAX_NB_WORDS)
 tokenizer.fit_on_texts(texts_1 + texts_2 + test_texts_1 + test_texts_2)
@@ -212,8 +175,10 @@ if re_weight:
 ########################################
 ## define the model structure
 ########################################
+
+
 embedding_layer = Embedding(nb_words,
-        EMBEDDING_DIM,
+        EMBEDDING_DIM,  
         weights=[embedding_matrix],
         input_length=MAX_SEQUENCE_LENGTH,
         trainable=False)
@@ -236,6 +201,8 @@ merged = Dropout(rate_drop_dense)(merged)
 merged = BatchNormalization()(merged)
 
 preds = Dense(1, activation='sigmoid')(merged)
+
+# val_loss 0.2605  test_loss 0.30227
 
 ########################################
 ## add class weight
@@ -279,12 +246,3 @@ preds /= 2
 
 submission = pd.DataFrame({'test_id':test_ids, 'is_duplicate':preds.ravel()})
 submission.to_csv('%.4f_'%(bst_val_score)+STAMP+'.csv', index=False)
-#%%
-import os
-for f in os.listdir('./'):
-    if 'csv' in f:
-        print f.ljust(30) + str(os.path.getsize('./'+f)/1000)+'MB'
-#%%
-import matplotlib.pyplot as plt
-plt.figure()
-plt.yscale
